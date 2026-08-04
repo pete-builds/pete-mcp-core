@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify version surfaces match the tag
+        # Fail closed: the published wheel must describe the version its tag
+        # claims. PyPI filenames are immutable, so a stale version here cannot
+        # be repaired after the fact the way a container tag can be re-pushed.
+        # Bump both surfaces in a commit BEFORE cutting the tag.
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          echo "Verifying every version surface matches tag ${REF_NAME} (${VERSION})..."
+
+          fail=0
+          check() {
+            local label="$1"
+            local expected="$2"
+            local actual="$3"
+            if [ "${actual}" != "${expected}" ]; then
+              echo "::error::${label} is '${actual}', expected '${expected}'"
+              fail=1
+            else
+              echo "  ok  ${label} = ${actual}"
+            fi
+          }
+
+          pyproject=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "([^"]+)"/\1/')
+          init=$(grep -E '^__version__ = ' src/pete_mcp_core/__init__.py | head -1 | sed -E 's/__version__ = "([^"]+)"/\1/')
+
+          check "pyproject.toml version" "${VERSION}" "${pyproject}"
+          check "src/pete_mcp_core/__init__.py __version__" "${VERSION}" "${init}"
+
+          if [ "${fail}" -ne 0 ]; then
+            echo ""
+            echo "::error::Version surfaces disagree with tag ${REF_NAME}."
+            echo "::error::Bump every surface in a commit BEFORE cutting the tag."
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check --strict dist/*
+
+      - name: Verify the built wheel imports and reports the tagged version
+        # Catches a package that builds but ships an empty or mislaid module
+        # tree, which `twine check` does not detect.
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --quiet dist/*.whl
+          actual=$(/tmp/verify/bin/python -c 'import pete_mcp_core; print(pete_mcp_core.__version__)')
+          if [ "${actual}" != "${VERSION}" ]; then
+            echo "::error::installed wheel reports ${actual}, expected ${VERSION}"
+            exit 1
+          fi
+          echo "  ok  installed wheel reports ${actual}"
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # OIDC token for PyPI trusted publishing
+      attestations: write
+      contents: read
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*
+
+      - name: Publish to PyPI
+        # Trusted publishing (OIDC). No API token stored in the repo.
+        # Requires a publisher configured at pypi.org for this repo +
+        # workflow + environment. See CONTRIBUTING.md.
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: GitHub release
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
