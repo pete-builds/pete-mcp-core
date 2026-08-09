@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -31,6 +32,37 @@ class TestResolveTransport:
         monkeypatch.setenv("MCP_TRANSPORT", "carrier-pigeon")
         with pytest.raises(ValueError, match="MCP_TRANSPORT"):
             _resolve_transport("stdio")
+
+    def test_warns_when_env_overrides_default(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv("MCP_TRANSPORT", "stdio")
+        with caplog.at_level(logging.WARNING, logger="pete_mcp_core.serve"):
+            assert _resolve_transport("streamable-http") == "stdio"
+        assert any(
+            "MCP_TRANSPORT env overrode default transport" in rec.getMessage()
+            for rec in caplog.records
+        )
+
+    def test_no_warn_when_env_matches_default(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv("MCP_TRANSPORT", "streamable-http")
+        with caplog.at_level(logging.WARNING, logger="pete_mcp_core.serve"):
+            _resolve_transport("streamable-http")
+        assert not any(
+            "MCP_TRANSPORT env overrode" in rec.getMessage() for rec in caplog.records
+        )
+
+    def test_no_warn_when_env_unset(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.delenv("MCP_TRANSPORT", raising=False)
+        with caplog.at_level(logging.WARNING, logger="pete_mcp_core.serve"):
+            _resolve_transport("streamable-http")
+        assert not any(
+            "MCP_TRANSPORT env overrode" in rec.getMessage() for rec in caplog.records
+        )
 
 
 class TestResolveHost:
@@ -131,3 +163,35 @@ class TestRunServer:
         mock_mcp = MagicMock()
         run_server(mock_mcp, default_transport="streamable-http", default_port=3805)
         mock_mcp.run.assert_called_once_with(transport="streamable-http", host="0.0.0.0", port=3805)
+
+    def test_http_startup_banner_logs_host_port(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.delenv("MCP_TRANSPORT", raising=False)
+        monkeypatch.delenv("MCP_HOST", raising=False)
+        monkeypatch.delenv("MCP_PORT", raising=False)
+        monkeypatch.delenv("FASTMCP_HOST", raising=False)
+        monkeypatch.delenv("FASTMCP_PORT", raising=False)
+        mock_mcp = MagicMock()
+        with caplog.at_level(logging.INFO, logger="pete_mcp_core.serve"):
+            run_server(
+                mock_mcp,
+                default_transport="streamable-http",
+                default_port=3707,
+                default_host="127.0.0.1",
+            )
+        assert any(
+            "127.0.0.1:3707" in rec.getMessage() and "streamable-http" in rec.getMessage()
+            for rec in caplog.records
+        )
+
+    def test_stdio_startup_banner_logs_stdio(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv("MCP_TRANSPORT", "stdio")
+        mock_mcp = MagicMock()
+        with caplog.at_level(logging.INFO, logger="pete_mcp_core.serve"):
+            run_server(mock_mcp)
+        assert any(
+            "stdio transport" in rec.getMessage() for rec in caplog.records
+        )

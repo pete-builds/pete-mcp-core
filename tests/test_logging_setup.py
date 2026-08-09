@@ -85,35 +85,63 @@ class TestJsonFormatter:
         assert parsed["extra"]["details"]["unifi_api_key"] == "[REDACTED]"
 
 
+def _core_handlers() -> list[logging.Handler]:
+    """Return only the handlers configure_logging owns."""
+    return [
+        h for h in logging.getLogger().handlers
+        if getattr(h, "_pete_mcp_core_handler", False)
+    ]
+
+
 class TestConfigureLogging:
     def teardown_method(self) -> None:
+        # Remove only our handlers; leave pytest's LogCaptureHandler alone so
+        # subsequent tests still get log capture.
         root = logging.getLogger()
         for handler in list(root.handlers):
-            root.removeHandler(handler)
+            if getattr(handler, "_pete_mcp_core_handler", False):
+                root.removeHandler(handler)
 
     def test_installs_stderr_handler(self) -> None:
         configure_logging(level="INFO", fmt="json")
-        root = logging.getLogger()
-        assert len(root.handlers) == 1
-        handler = root.handlers[0]
+        core = _core_handlers()
+        assert len(core) == 1
+        handler = core[0]
         assert isinstance(handler, logging.StreamHandler)
         assert handler.stream is sys.stderr
 
     def test_idempotent(self) -> None:
         configure_logging(level="INFO", fmt="json")
         configure_logging(level="DEBUG", fmt="text")
+        assert len(_core_handlers()) == 1
+        assert logging.getLogger().level == logging.DEBUG
+
+    def test_preserves_external_handlers(self) -> None:
+        # A handler installed by something else (pytest's LogCaptureHandler is
+        # the load-bearing example) must survive configure_logging so the
+        # caller's log capture keeps working after a server module import.
         root = logging.getLogger()
-        assert len(root.handlers) == 1
-        assert root.level == logging.DEBUG
+        external = logging.NullHandler()
+        root.addHandler(external)
+        try:
+            configure_logging(level="INFO", fmt="json")
+            assert external in root.handlers
+            # Second call should also leave the external handler in place
+            # while still only owning one core handler.
+            configure_logging(level="INFO", fmt="text")
+            assert external in root.handlers
+            assert len(_core_handlers()) == 1
+        finally:
+            root.removeHandler(external)
 
     def test_json_format(self) -> None:
         configure_logging(level="INFO", fmt="json")
-        handler = logging.getLogger().handlers[0]
+        handler = _core_handlers()[0]
         assert isinstance(handler.formatter, JsonFormatter)
 
     def test_text_format(self) -> None:
         configure_logging(level="INFO", fmt="text")
-        handler = logging.getLogger().handlers[0]
+        handler = _core_handlers()[0]
         assert not isinstance(handler.formatter, JsonFormatter)
 
     def test_extra_sensitive_keys_extend(self) -> None:
@@ -122,7 +150,7 @@ class TestConfigureLogging:
             fmt="json",
             extra_sensitive_keys=["unifi_api_key", "wlan_passphrase"],
         )
-        handler = logging.getLogger().handlers[0]
+        handler = _core_handlers()[0]
         assert isinstance(handler.formatter, JsonFormatter)
         assert "unifi_api_key" in handler.formatter._sensitive_keys
         assert "wlan_passphrase" in handler.formatter._sensitive_keys

@@ -61,3 +61,23 @@ class TestBuildAuthProvider:
         with caplog.at_level(logging.WARNING, logger="test.auth"):
             build_auth_provider("tok", client_id="test", logger=logger)
         assert not any("bearer token" in rec.getMessage().lower() for rec in caplog.records)
+
+    def test_logger_info_when_auth_enabled(self, caplog: pytest.LogCaptureFixture) -> None:
+        logger = logging.getLogger("test.auth")
+        with caplog.at_level(logging.INFO, logger="test.auth"):
+            result = build_auth_provider("tok", client_id="my-client", logger=logger)
+        assert result is not None
+        assert any(
+            "bearer-token authentication enabled" in rec.getMessage().lower()
+            and "my-client" in rec.getMessage()
+            for rec in caplog.records
+        )
+
+    def test_no_info_when_logger_missing(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.INFO):
+            result = build_auth_provider("tok", client_id="test")
+        assert result is not None
+        assert not any(
+            "bearer-token authentication enabled" in rec.getMessage().lower()
+            for rec in caplog.records
+        )

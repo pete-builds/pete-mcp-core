@@ -11,6 +11,12 @@ any log line on stdout corrupts the protocol.
 The formatter scrubs a small set of well-known sensitive keys defensively in
 case caller code accidentally drops one into ``extra``. Callers can pass
 additional sensitive-key names via ``extra_sensitive_keys``.
+
+``configure_logging`` is idempotent by way of tagging its own handler: on
+re-entry it only replaces handlers it previously installed and leaves any
+other root handler (e.g. pytest's ``LogCaptureHandler``) alone. Importing a
+server module from a test process therefore does not silently drop the test
+runner's log capture.
 """
 
 from __future__ import annotations
@@ -109,6 +115,9 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
+_HANDLER_MARKER = "_pete_mcp_core_handler"
+
+
 def configure_logging(
     level: str = "INFO",
     fmt: str = "json",
@@ -116,6 +125,11 @@ def configure_logging(
     extra_sensitive_keys: Iterable[str] | None = None,
 ) -> None:
     """Configure the root logger. Idempotent — safe to call multiple times.
+
+    Only removes and replaces handlers this function previously installed
+    (identified by an internal marker attribute). External handlers on the
+    root logger (pytest's ``LogCaptureHandler``, an aggregator's shim, a
+    caller-installed observer) are left in place.
 
     Args:
         level: Log level (``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, ``CRITICAL``).
@@ -126,9 +140,11 @@ def configure_logging(
     root = logging.getLogger()
     root.setLevel(level.upper())
     for handler in list(root.handlers):
-        root.removeHandler(handler)
+        if getattr(handler, _HANDLER_MARKER, False):
+            root.removeHandler(handler)
 
     handler = logging.StreamHandler(stream=sys.stderr)
+    setattr(handler, _HANDLER_MARKER, True)
     if fmt == "json":
         keys = DEFAULT_SENSITIVE_KEYS
         if extra_sensitive_keys:

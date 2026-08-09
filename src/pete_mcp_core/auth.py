@@ -70,6 +70,12 @@ def build_auth_provider(
                 extra={"client_id": client_id},
             )
         return None
+    if logger is not None:
+        logger.info(
+            "Bearer-token authentication enabled for %s",
+            client_id,
+            extra={"client_id": client_id},
+        )
     return StaticTokenVerifier(
         tokens={unwrapped: {"client_id": client_id, "scopes": scopes or []}},
     )

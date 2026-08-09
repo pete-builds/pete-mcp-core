@@ -92,6 +92,18 @@ class TestMain:
             main()
         mock_check.assert_called_once_with(3703, path="/mcp")
 
+    def test_fastmcp_port_wins_over_mcp_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Matches serve.py's precedence so the healthcheck never targets a
+        # different port than run_server binds.
+        monkeypatch.setenv("FASTMCP_PORT", "3703")
+        monkeypatch.setenv("MCP_PORT", "9999")
+        with (
+            patch("pete_mcp_core.healthcheck.check", return_value=0) as mock_check,
+            pytest.raises(SystemExit),
+        ):
+            main()
+        mock_check.assert_called_once_with(3703, path="/mcp")
+
     def test_default_port_when_env_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MCP_PORT", raising=False)
         monkeypatch.delenv("FASTMCP_PORT", raising=False)
@@ -102,6 +114,30 @@ class TestMain:
             main()
         assert exc.value.code == 1
         mock_check.assert_called_once_with(3800, path="/mcp")
+
+    def test_caller_default_port_when_env_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MCP_PORT", raising=False)
+        monkeypatch.delenv("FASTMCP_PORT", raising=False)
+        with (
+            patch("pete_mcp_core.healthcheck.check", return_value=0) as mock_check,
+            pytest.raises(SystemExit),
+        ):
+            main(default_port=3707)
+        mock_check.assert_called_once_with(3707, path="/mcp")
+
+    def test_env_still_wins_over_caller_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FASTMCP_PORT", "4242")
+        monkeypatch.delenv("MCP_PORT", raising=False)
+        with (
+            patch("pete_mcp_core.healthcheck.check", return_value=0) as mock_check,
+            pytest.raises(SystemExit),
+        ):
+            main(default_port=3707)
+        mock_check.assert_called_once_with(4242, path="/mcp")
 
     def test_custom_health_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MCP_PORT", "3800")

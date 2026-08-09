@@ -8,10 +8,16 @@ falls back through ``FASTMCP_HOST`` / ``MCP_HOST`` / default and
 Also mirrors host/port back into ``FASTMCP_HOST`` / ``FASTMCP_PORT`` before
 calling ``mcp.run(...)`` so any FastMCP internal that consults those env vars
 sees the resolved value.
+
+Logs a WARNING when ``MCP_TRANSPORT`` overrides the caller's default (a stray
+``MCP_TRANSPORT=stdio`` on an HTTP deployment silently disables the listener
+otherwise), and an INFO startup banner naming the bound host/port/transport
+so operators can confirm the server came up on the interface they expected.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import TYPE_CHECKING
 
@@ -19,10 +25,21 @@ if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 
+logger = logging.getLogger(__name__)
+
+
 def _resolve_transport(default: str) -> str:
-    value = os.getenv("MCP_TRANSPORT", default).strip().lower()
+    env_value = os.getenv("MCP_TRANSPORT")
+    value = default if env_value is None else env_value.strip().lower()
     if value not in {"stdio", "streamable-http"}:
         raise ValueError(f"MCP_TRANSPORT must be 'stdio' or 'streamable-http', got {value!r}")
+    if env_value is not None and value != default:
+        logger.warning(
+            "MCP_TRANSPORT env overrode default transport %r -> %r; "
+            "server may not be reachable as its deployment expects",
+            default,
+            value,
+        )
     return value
 
 
@@ -57,6 +74,7 @@ def run_server(
     """
     transport = _resolve_transport(default_transport)
     if transport == "stdio":
+        logger.info("Starting MCP server on stdio transport")
         mcp.run(transport="stdio")
         return
 
@@ -64,4 +82,7 @@ def run_server(
     port = _resolve_port(default_port)
     os.environ["FASTMCP_HOST"] = host
     os.environ["FASTMCP_PORT"] = str(port)
+    logger.info(
+        "Starting MCP server on %s:%d (transport=streamable-http)", host, port
+    )
     mcp.run(transport="streamable-http", host=host, port=port)

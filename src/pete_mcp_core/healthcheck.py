@@ -8,8 +8,13 @@ Two modes:
 - ``path="/health"``: for servers that install a dedicated ``/health`` custom
   route via ``@mcp.custom_route``. Expects 200.
 
-The CLI reads ``MCP_PORT`` / ``FASTMCP_PORT`` and ``MCP_HEALTH_PATH``
+The CLI reads ``FASTMCP_PORT`` / ``MCP_PORT`` and ``MCP_HEALTH_PATH``
 (defaulting to ``/mcp``) so the same Docker directive works for either style.
+Precedence matches :mod:`pete_mcp_core.serve` (``FASTMCP_PORT`` wins) so the
+server and the healthcheck never target different ports.
+
+Callers should pass ``default_port`` matching the server's own default so a
+container running without any port env var still probes the right port.
 """
 
 from __future__ import annotations
@@ -43,8 +48,8 @@ def check(
     return 0 if resp.status in codes else 1
 
 
-def main() -> None:
-    port_str = os.getenv("MCP_PORT") or os.getenv("FASTMCP_PORT") or "3800"
+def main(default_port: int = 3800) -> None:
+    port_str = os.getenv("FASTMCP_PORT") or os.getenv("MCP_PORT") or str(default_port)
     path = os.getenv("MCP_HEALTH_PATH", "/mcp")
     try:
         port = int(port_str)
