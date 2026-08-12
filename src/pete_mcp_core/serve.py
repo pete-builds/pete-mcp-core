@@ -82,7 +82,5 @@ def run_server(
     port = _resolve_port(default_port)
     os.environ["FASTMCP_HOST"] = host
     os.environ["FASTMCP_PORT"] = str(port)
-    logger.info(
-        "Starting MCP server on %s:%d (transport=streamable-http)", host, port
-    )
+    logger.info("Starting MCP server on %s:%d (transport=streamable-http)", host, port)
     mcp.run(transport="streamable-http", host=host, port=port)

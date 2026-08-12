@@ -50,9 +50,7 @@ class TestResolveTransport:
         monkeypatch.setenv("MCP_TRANSPORT", "streamable-http")
         with caplog.at_level(logging.WARNING, logger="pete_mcp_core.serve"):
             _resolve_transport("streamable-http")
-        assert not any(
-            "MCP_TRANSPORT env overrode" in rec.getMessage() for rec in caplog.records
-        )
+        assert not any("MCP_TRANSPORT env overrode" in rec.getMessage() for rec in caplog.records)
 
     def test_no_warn_when_env_unset(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -60,9 +58,7 @@ class TestResolveTransport:
         monkeypatch.delenv("MCP_TRANSPORT", raising=False)
         with caplog.at_level(logging.WARNING, logger="pete_mcp_core.serve"):
             _resolve_transport("streamable-http")
-        assert not any(
-            "MCP_TRANSPORT env overrode" in rec.getMessage() for rec in caplog.records
-        )
+        assert not any("MCP_TRANSPORT env overrode" in rec.getMessage() for rec in caplog.records)
 
 
 class TestResolveHost:
@@ -192,6 +188,4 @@ class TestRunServer:
         mock_mcp = MagicMock()
         with caplog.at_level(logging.INFO, logger="pete_mcp_core.serve"):
             run_server(mock_mcp)
-        assert any(
-            "stdio transport" in rec.getMessage() for rec in caplog.records
-        )
+        assert any("stdio transport" in rec.getMessage() for rec in caplog.records)

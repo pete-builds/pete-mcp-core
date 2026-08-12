@@ -115,9 +115,7 @@ class TestMain:
         assert exc.value.code == 1
         mock_check.assert_called_once_with(3800, path="/mcp")
 
-    def test_caller_default_port_when_env_absent(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_caller_default_port_when_env_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MCP_PORT", raising=False)
         monkeypatch.delenv("FASTMCP_PORT", raising=False)
         with (
@@ -127,9 +125,7 @@ class TestMain:
             main(default_port=3707)
         mock_check.assert_called_once_with(3707, path="/mcp")
 
-    def test_env_still_wins_over_caller_default(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_still_wins_over_caller_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("FASTMCP_PORT", "4242")
         monkeypatch.delenv("MCP_PORT", raising=False)
         with (

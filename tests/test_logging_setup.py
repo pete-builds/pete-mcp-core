@@ -87,10 +87,7 @@ class TestJsonFormatter:
 
 def _core_handlers() -> list[logging.Handler]:
     """Return only the handlers configure_logging owns."""
-    return [
-        h for h in logging.getLogger().handlers
-        if getattr(h, "_pete_mcp_core_handler", False)
-    ]
+    return [h for h in logging.getLogger().handlers if getattr(h, "_pete_mcp_core_handler", False)]
 
 
 class TestConfigureLogging:
