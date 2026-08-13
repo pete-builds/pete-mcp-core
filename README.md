@@ -14,7 +14,7 @@ implicit; every module is under 200 lines.
 | Module | What it gives you |
 |---|---|
 | `pete_mcp_core.logging_setup` | `configure_logging(level, fmt)`, `JsonFormatter`, sensitive-key scrub. Stderr-only (stdio-transport safe). |
-| `pete_mcp_core.healthcheck` | `check(port, path)` and a `pete-mcp-healthcheck` CLI for Docker `HEALTHCHECK` directives. |
+| `pete_mcp_core.healthcheck` | `check(port, path)` and a `pete-mcp-healthcheck` CLI for Docker `HEALTHCHECK` directives. Probes a session-free sentinel path, never `/mcp` — see [Healthcheck](#healthcheck). |
 | `pete_mcp_core.serve` | `run_server(mcp, *, default_port)` — stdio + streamable-http switch, `FASTMCP_HOST` / `MCP_HOST` env fallback. |
 | `pete_mcp_core.errors` | `@tool_errors(logger, *, catch)` decorator + shared `format_response(data)` helper. |
 | `pete_mcp_core.settings` | `BaseCoreSettings` — `mcp_transport`, `mcp_host`, `mcp_port`, `log_level`, `log_format`, `auth_token`, `auth_required`. |
@@ -64,6 +64,54 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 ```
+
+## Healthcheck
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
+    CMD pete-mcp-healthcheck || exit 1
+```
+
+That is the whole integration. **Do not set `MCP_HEALTH_PATH=/mcp`.**
+
+In MCP streamable-http, any request reaching the `/mcp` mount creates a
+transport session before method dispatch, and nothing reaps it. Measured on a
+FastMCP 3.4.4 container over 300 requests, the HTTP verb makes no difference:
+
+| Probe | RSS growth | Per request | Sessions created |
+|---|---|---|---|
+| `GET /mcp` | +10.95 MiB | 38.3 KB | 300 |
+| `HEAD /mcp` | +12.74 MiB | 44.5 KB | 300 |
+| `OPTIONS /mcp` | +12.74 MiB | 44.5 KB | 300 |
+| `GET /__pete_mcp_liveness` (default) | **+0.00 MiB** | **0 B** | **0** |
+
+At a 30s interval, probing `/mcp` is ~2880 sessions/day ≈ 115 MiB/day ≈
+**3.4 GiB/month per server**, never reclaimed.
+
+The default `DEFAULT_HEALTH_PATH` is `/__pete_mcp_liveness`, a path no server
+routes. Starlette answers 404, which proves the process is listening and its
+ASGI app is routing, without touching transport state. It answers 404 under
+`MCP_AUTH_REQUIRED=true` as well, so an auth-enabled server does not report
+unhealthy just because the probe is unauthenticated.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `FASTMCP_PORT` / `MCP_PORT` | `default_port` arg | Port. Precedence matches `serve.py`. |
+| `MCP_HEALTH_PATH` | `/__pete_mcp_liveness` | Path to probe. |
+| `MCP_HEALTH_CODES` | `DEFAULT_HEALTHY_CODES` | Comma-separated healthy codes, e.g. `200,503`. |
+
+`DEFAULT_HEALTHY_CODES` is `{200, 204, 400, 401, 404, 405, 406, 503}`. A
+container healthcheck answers exactly one question — "should Docker restart
+this?" — so a server whose only problem is an expiring credential (503) or an
+unauthenticated probe (401) must pass: a restart cannot renew a credential, it
+only produces a restart loop. `500` is excluded so a genuine fault still fails.
+
+If you point `MCP_HEALTH_PATH` at your own `@mcp.custom_route` health
+endpoint, that works and is session-free too. Use `MCP_HEALTH_CODES` if the
+route's status codes differ from the defaults. Servers still on
+`MCP_HEALTH_PATH=/mcp` keep working, log a warning, and get best-effort
+`DELETE` session reaping (measured 38.3 KB → 2.9 KB per probe, a 92% cut) —
+damage control, not a fix. Unset it.
 
 ## Design notes
 
