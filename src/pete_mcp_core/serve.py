@@ -21,6 +21,8 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from pete_mcp_core.session_reaper import enable_session_reaper
+
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
@@ -80,6 +82,9 @@ def run_server(
 
     host = _resolve_host(default_host)
     port = _resolve_port(default_port)
+    # Stateful streamable-http sessions are never reaped without this; see
+    # session_reaper for why FastMCP cannot reach the SDK's own timeout yet.
+    enable_session_reaper()
     os.environ["FASTMCP_HOST"] = host
     os.environ["FASTMCP_PORT"] = str(port)
     logger.info("Starting MCP server on %s:%d (transport=streamable-http)", host, port)

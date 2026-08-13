@@ -7,6 +7,36 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Session reaping for streamable-http.** The MCP SDK registers a transport
+  session per client and never reaps it; the SDK's own `session_idle_timeout`
+  fixes this, but FastMCP neither passes nor exposes the parameter, so
+  `mcp.http_app(session_idle_timeout=1800)` raises `TypeError`. Sessions
+  therefore accumulated for the life of the process on every server, and a
+  client that disconnects without `DELETE` leaked one each time.
+
+  New `pete_mcp_core.session_reaper.enable_session_reaper()` patches the SDK
+  manager to supply a default, and `run_server` installs it automatically on
+  the streamable-http path. Default 1800s, matching the SDK's own
+  recommendation; tune or disable with `MCP_SESSION_IDLE_TIMEOUT`. Never
+  overrides an explicit caller, skips stateless mode (where the SDK rejects the
+  parameter), and warns instead of failing on an SDK too old to support it.
+
+  Verified end to end against a live FastMCP server at a 3s timeout: **25 probe
+  requests created 25 sessions, and `_server_instances` returned to 0 within
+  4s.**
+
+  This is a workaround for [PrefectHQ/fastmcp#3443](https://github.com/PrefectHQ/fastmcp/pull/3443).
+  Remove `session_reaper.py` once that PR lands. Upstream detail in
+  [python-sdk#3228](https://github.com/modelcontextprotocol/python-sdk/issues/3228)
+  and [#2455](https://github.com/modelcontextprotocol/python-sdk/issues/2455).
+
+  Known residual: a session terminated by an explicit `DELETE` still leaves its
+  entry in `_server_instances`, because the SDK skips that cleanup when the
+  transport is already terminated. A few KB per session rather than the ~40 KB
+  an orphaned session holds.
+
 ### Fixed
 
 - **Memory leak: the healthcheck no longer probes the MCP transport endpoint.**

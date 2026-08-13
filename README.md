@@ -18,6 +18,7 @@ implicit; every module is under 200 lines.
 | `pete_mcp_core.serve` | `run_server(mcp, *, default_port)` — stdio + streamable-http switch, `FASTMCP_HOST` / `MCP_HOST` env fallback. |
 | `pete_mcp_core.errors` | `@tool_errors(logger, *, catch)` decorator + shared `format_response(data)` helper. |
 | `pete_mcp_core.settings` | `BaseCoreSettings` — `mcp_transport`, `mcp_host`, `mcp_port`, `log_level`, `log_format`, `auth_token`, `auth_required`. |
+| `pete_mcp_core.session_reaper` | `enable_session_reaper(timeout)` gives streamable-http sessions an idle timeout the SDK will honor. Installed automatically by `run_server`; see [Session reaping](#session-reaping). |
 | `pete_mcp_core.auth` | `build_auth_provider(token, *, client_id, required)` returning a FastMCP `StaticTokenVerifier` or `None`. |
 
 ## Install
@@ -112,6 +113,41 @@ route's status codes differ from the defaults. Servers still on
 `MCP_HEALTH_PATH=/mcp` keep working, log a warning, and get best-effort
 `DELETE` session reaping (measured 38.3 KB → 2.9 KB per probe, a 92% cut) —
 damage control, not a fix. Unset it.
+
+## Session reaping
+
+In stateful streamable-http (the default), the MCP SDK registers a transport
+session and never reaps it. The SDK added `session_idle_timeout` to fix that,
+and its own docstring recommends 1800 seconds, but FastMCP neither passes nor
+exposes it:
+
+```python
+>>> mcp.http_app(session_idle_timeout=1800)
+TypeError: TransportMixin.http_app() got an unexpected keyword argument 'session_idle_timeout'
+```
+
+So sessions accumulate for the life of the process on every server. A client
+that disconnects without sending `DELETE` leaks one every time.
+
+`run_server` closes that gap by patching the SDK manager to supply a default,
+which is exactly what FastMCP will do natively once
+[PrefectHQ/fastmcp#3443](https://github.com/PrefectHQ/fastmcp/pull/3443) lands.
+Delete `session_reaper.py` when it does.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `MCP_SESSION_IDLE_TIMEOUT` | `1800` | Seconds of inactivity before a session is reaped. Set to `off` to disable. |
+
+Verified end to end against a live FastMCP server at a 3s timeout: 25 probe
+requests created 25 sessions, and `_server_instances` was back to 0 within 4s.
+
+Two caveats. Keep the timeout comfortably above any SSE polling gap, because
+the SDK's timeout can cancel a session while a request is in flight
+([python-sdk#2455](https://github.com/modelcontextprotocol/python-sdk/issues/2455)).
+And a session terminated by an explicit `DELETE` still leaves its registry
+entry behind, which this does not address; that costs a few KB rather than the
+~40 KB an orphaned session holds
+([python-sdk#3228](https://github.com/modelcontextprotocol/python-sdk/issues/3228)).
 
 ## Design notes
 
