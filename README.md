@@ -23,9 +23,36 @@ implicit; every module is under 200 lines.
 
 ## Install
 
+**Not on PyPI yet**, so `pip install pete-mcp-core` will not resolve. Install
+from an immutable commit tarball instead:
+
 ```bash
-pip install pete-mcp-core
+pip install "pete-mcp-core @ https://github.com/pete-builds/pete-mcp-core/archive/<commit-sha>.tar.gz"
 ```
+
+Use a full 40-character commit SHA, not a branch name. A branch tarball is
+mutable: the same URL returns different bytes over time, so the install is not
+reproducible and the hash pin below cannot hold.
+
+In a requirements file, pin the same way and let the resolver hash it:
+
+```
+# requirements.in
+pete-mcp-core @ https://github.com/pete-builds/pete-mcp-core/archive/<commit-sha>.tar.gz
+```
+
+```bash
+uv pip compile requirements.in -o requirements.lock --generate-hashes --universal --python-version 3.13
+pip install --require-hashes -r requirements.lock
+```
+
+`uv` records a sha256 for the tarball alongside every other wheel, so
+`--require-hashes` covers this dependency exactly like a PyPI one.
+
+The PyPI publish is pending: the release workflow ran and failed on a missing
+trusted publisher. Once it lands, this section goes back to a plain
+`pip install pete-mcp-core` and the tarball pins can be replaced with a normal
+version specifier.
 
 ## Minimal server
 
