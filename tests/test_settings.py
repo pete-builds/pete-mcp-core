@@ -30,7 +30,9 @@ class TestBaseCoreSettings:
         assert settings.log_level == "INFO"
         assert settings.log_format == "json"
         assert settings.auth_token is None
-        assert settings.auth_required is False
+        # Defaults True on purpose: a streamable-http server with no credential
+        # is not a safe default. Set MCP_AUTH_REQUIRED=false to opt out.
+        assert settings.auth_required is True
 
     def test_env_vars_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MCP_TRANSPORT", "streamable-http")

@@ -55,6 +55,12 @@ class BaseCoreSettings(BaseSettings):
         description="Bearer token for the streamable-http transport. Unset = no auth.",
     )
     auth_required: bool = Field(
-        default=False,
-        description="If True and streamable-http is selected, refuse to start without auth_token.",
+        default=True,
+        description=(
+            "If True and streamable-http is selected, refuse to start without auth_token. "
+            "Defaults True: a network transport with no credential is not a safe default, "
+            "and the previous default of False meant every server that forgot to set it "
+            "served every tool unauthenticated after a single log line nobody reads. "
+            "Set MCP_AUTH_REQUIRED=false to deliberately run open on a trusted network."
+        ),
     )

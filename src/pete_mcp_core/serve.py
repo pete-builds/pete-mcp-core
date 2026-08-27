@@ -65,6 +65,7 @@ def run_server(
     default_port: int = 3800,
     default_transport: str = "stdio",
     default_host: str = "0.0.0.0",
+    allow_unauthenticated: bool = False,
 ) -> None:
     """Run a FastMCP server, resolving transport/host/port from env vars.
 
@@ -72,6 +73,10 @@ def run_server(
         mcp: A FastMCP instance with tools already registered.
         default_port: Port used for streamable-http when no env var is set.
         default_transport: ``stdio`` or ``streamable-http``.
+        allow_unauthenticated: Escape hatch. When ``True``, a streamable-http
+            server with no auth provider is permitted to start. Leave it
+            ``False`` unless the deployment is deliberately open on a trusted
+            network.
         default_host: Bind host for streamable-http when no env var is set.
     """
     transport = _resolve_transport(default_transport)
@@ -79,6 +84,19 @@ def run_server(
         logger.info("Starting MCP server on stdio transport")
         mcp.run(transport="stdio")
         return
+
+    # Belt and braces against the settings default. Flipping auth_required to True
+    # only protects servers that thread it through build_auth_provider; this catches
+    # the ones that build auth some other way, or not at all. A network transport
+    # with no credential is refused here rather than warned about, because the
+    # warning this replaces went into a JSON log on a container that restarts
+    # unless-stopped, which is the same as no warning at all.
+    if getattr(mcp, "auth", None) is None and not allow_unauthenticated:
+        raise ValueError(
+            "Refusing to start streamable-http with no auth provider. "
+            "Set MCP_AUTH_TOKEN (and leave MCP_AUTH_REQUIRED at its default), "
+            "or pass allow_unauthenticated=True to run open deliberately."
+        )
 
     host = _resolve_host(default_host)
     port = _resolve_port(default_port)

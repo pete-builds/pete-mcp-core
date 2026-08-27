@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -189,3 +190,39 @@ class TestRunServer:
         with caplog.at_level(logging.INFO, logger="pete_mcp_core.serve"):
             run_server(mock_mcp)
         assert any("stdio transport" in rec.getMessage() for rec in caplog.records)
+
+
+class TestUnauthenticatedHttpIsRefused:
+    """A network transport with no auth provider must not start silently.
+
+    The behaviour this replaces was a single logger.warning followed by a bound
+    socket. On a container that restarts unless-stopped, nobody reads that line.
+    """
+
+    def test_http_with_no_auth_provider_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MCP_TRANSPORT", "streamable-http")
+        mcp = SimpleNamespace(auth=None, run=lambda **kw: None)
+        with pytest.raises(ValueError, match="Refusing to start streamable-http"):
+            run_server(mcp)  # type: ignore[arg-type]
+
+    def test_explicit_opt_out_is_honoured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MCP_TRANSPORT", "streamable-http")
+        called: dict[str, object] = {}
+        mcp = SimpleNamespace(auth=None, run=lambda **kw: called.update(kw))
+        run_server(mcp, allow_unauthenticated=True)  # type: ignore[arg-type]
+        assert called["transport"] == "streamable-http"
+
+    def test_auth_provider_present_starts_normally(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MCP_TRANSPORT", "streamable-http")
+        called: dict[str, object] = {}
+        mcp = SimpleNamespace(auth=object(), run=lambda **kw: called.update(kw))
+        run_server(mcp)  # type: ignore[arg-type]
+        assert called["transport"] == "streamable-http"
+
+    def test_stdio_is_unaffected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """stdio has no listening socket, so it is exempt by design."""
+        monkeypatch.setenv("MCP_TRANSPORT", "stdio")
+        called: dict[str, object] = {}
+        mcp = SimpleNamespace(auth=None, run=lambda **kw: called.update(kw))
+        run_server(mcp)  # type: ignore[arg-type]
+        assert called["transport"] == "stdio"
