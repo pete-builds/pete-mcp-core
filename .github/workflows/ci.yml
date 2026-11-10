@@ -16,6 +16,25 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
+        deps: [latest]
+        # What the session reaper has to do depends on the FastMCP and MCP SDK
+        # pair, and both float. These legs hold the lines that behave
+        # differently, so a change in either shows up on the pull request that
+        # causes it rather than as a red main nobody touched.
+        include:
+          # Declared floor: FastMCP passes no idle timeout, the SDK defaults to
+          # none and rejects one in stateless mode.
+          - python-version: "3.13"
+            deps: floor
+            pins: "fastmcp==3.4.2 mcp==1.27.0"
+          # Newest FastMCP 3: passes no idle timeout, the SDK defaults to 1800.
+          - python-version: "3.13"
+            deps: fastmcp-3
+            pins: "fastmcp<4"
+          # FastMCP 4.0: always passes its own setting, which defaults to none.
+          - python-version: "3.13"
+            deps: fastmcp-4.0
+            pins: "fastmcp>=4.0,<4.1 mcp==2.1.0"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -26,9 +45,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install package and dev tooling
+        env:
+          PINS: ${{ matrix.pins }}
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          # PINS is unquoted on purpose: it holds zero or more requirements.
+          pip install -e ".[dev]" $PINS
+          pip list | grep -i -E "^(fastmcp|mcp) "
 
       - name: Ruff lint
         run: ruff check .

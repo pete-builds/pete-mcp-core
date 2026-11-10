@@ -144,29 +144,59 @@ damage control, not a fix. Unset it.
 ## Session reaping
 
 In stateful streamable-http (the default), the MCP SDK registers a transport
-session and never reaps it. The SDK added `session_idle_timeout` to fix that,
-and its own docstring recommends 1800 seconds, but FastMCP neither passes nor
-exposes it:
+session per client and keeps it until the client sends `DELETE`. A client that
+disconnects without one leaves about 40 KB behind, every time. The SDK's
+`session_idle_timeout` reaps those sessions, but whether a server actually gets
+one depends on which FastMCP and SDK pair happens to be installed, and both
+float. Measured with nothing configured:
 
-```python
->>> mcp.http_app(session_idle_timeout=1800)
-TypeError: TransportMixin.http_app() got an unexpected keyword argument 'session_idle_timeout'
-```
+| FastMCP | MCP SDK | Idle timeout a default server gets |
+|---|---|---|
+| 3.4.2 | 1.27.0 | none: sessions never reaped |
+| 3.4.2, 3.4.11 | 1.30.0 | 1800s |
+| 4.0.11 | 2.1.0, 2.3.0 | none: sessions never reaped |
+| 4.1.0, 4.1.7 | 2.3.0 | 1800s |
 
-So sessions accumulate for the life of the process on every server. A client
-that disconnects without sending `DELETE` leaks one every time.
+FastMCP 3 passes no timeout, so the SDK's default decides, and that default
+changed from none to 1800. FastMCP 4.0 always passes its own
+`http_session_idle_timeout` setting, which defaults to none and so switches the
+SDK's default back off. FastMCP 4.1 changed that setting to `auto`.
 
-`run_server` closes that gap by patching the SDK manager to supply a default,
-which is exactly what FastMCP will do natively once
-[PrefectHQ/fastmcp#3443](https://github.com/PrefectHQ/fastmcp/pull/3443) lands.
-Delete `session_reaper.py` when it does.
+`run_server` takes the dependency resolver out of the decision. It patches the
+SDK manager so that a session manager nobody configured gets one known value,
+on every pair in the table.
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `MCP_SESSION_IDLE_TIMEOUT` | `1800` | Seconds of inactivity before a session is reaped. Set to `off` to disable. |
+| `MCP_SESSION_IDLE_TIMEOUT` | `1800` | Seconds of inactivity before a session is reaped. Set to `off` for no idle timeout. |
 
-Verified end to end against a live FastMCP server at a 3s timeout: 25 probe
-requests created 25 sessions, and `_server_instances` was back to 0 within 4s.
+Who wins, in order:
+
+1. A `session_idle_timeout` passed to the SDK manager by hand. Never overridden.
+2. FastMCP 4's own knob, when it yields a number: the
+   `FASTMCP_HTTP_SESSION_IDLE_TIMEOUT` env var or `http_app(session_idle_timeout=...)`.
+   On FastMCP 4.1 and later, `none` there is honored too. On 4.0 it cannot be
+   told apart from "not set", so use `MCP_SESSION_IDLE_TIMEOUT=off` instead.
+3. `MCP_SESSION_IDLE_TIMEOUT`, then the 1800s default.
+
+`off` means no idle timeout, including on an SDK that would otherwise default
+to 1800. Stateless servers (`stateless_http=True`) are left alone: there is
+nothing to reap, and an older SDK refuses to start a stateless manager that was
+handed a timeout.
+
+A server that wants its own default calls `enable_session_reaper(seconds)`
+before `run_server`. The first call decides; later calls return what it
+installed.
+
+Verified end to end on six FastMCP and SDK pairs from the table (2026-11-09):
+25 sessions opened against a live FastMCP app at a 3s timeout were all gone
+after 5s idle, and all 25 were still there without the reaper.
+
+CI runs the suite on the newest FastMCP and on pinned legs for the declared
+floor, the newest FastMCP 3, and FastMCP 4.0, so an upstream change to either
+default fails the pull request that pulls it in. `session_reaper.py` can go
+once the minimum supported FastMCP is 4.1 or later and a default server on it
+still gets a timeout.
 
 Two caveats. Keep the timeout comfortably above any SSE polling gap, because
 the SDK's timeout can cancel a session while a request is in flight
