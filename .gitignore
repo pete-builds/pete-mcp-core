@@ -23,3 +23,7 @@ env/
 .python-version
 *.log
 .DS_Store
+
+# A library ships version ranges, not a lock. CI installs with pip from
+# pyproject.toml, so a committed uv.lock is tested by nothing and only goes stale.
+uv.lock

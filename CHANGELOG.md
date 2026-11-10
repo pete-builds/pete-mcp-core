@@ -135,6 +135,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `docker logs | grep -i auth` can now confirm auth is wired before opening
   the port.
 
+### Removed
+
+- `uv.lock`, and it is now ignored. It arrived unannounced with the
+  fail-closed auth change and nothing ever read it: CI installs with pip from
+  `pyproject.toml`, and a server that depends on this library resolves its own
+  versions from its own lock. Left to go stale it had collected 35 open
+  security advisories against versions no build installs.
+
 ## [0.1.0]
 
 First release. Extracted from `mcp-unifi` and the three servers that had each
