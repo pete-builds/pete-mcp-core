@@ -27,8 +27,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   requests created 25 sessions, and `_server_instances` returned to 0 within
   4s.**
 
-  This is a workaround for [PrefectHQ/fastmcp#3443](https://github.com/PrefectHQ/fastmcp/pull/3443).
-  Remove `session_reaper.py` once that PR lands. Upstream detail in
+  FastMCP 3 neither passes nor exposes the parameter
+  ([PrefectHQ/fastmcp#3443](https://github.com/PrefectHQ/fastmcp/pull/3443)
+  proposed it and was closed unmerged); FastMCP 4 has its own setting, see the
+  Fixed entry below. Upstream detail in
   [python-sdk#3228](https://github.com/modelcontextprotocol/python-sdk/issues/3228)
   and [#2455](https://github.com/modelcontextprotocol/python-sdk/issues/2455).
 
@@ -38,6 +40,33 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   an orphaned session holds.
 
 ### Fixed
+
+- **The session reaper no longer depends on which FastMCP and SDK got
+  installed.** It was written when an unconfigured SDK manager had no idle
+  timeout. Since then the SDK began defaulting to 1800s (mcp 1.30.0, 2.3.0) and
+  FastMCP 4 began passing its own setting, and three things went wrong at once:
+
+  - `MCP_SESSION_IDLE_TIMEOUT=off` logged "disabled" and left the SDK's 1800s
+    in force. It now installs an explicit "no timeout".
+  - On FastMCP 4.0.x the reaper silently did nothing. FastMCP 4.0 always passes
+    its `http_session_idle_timeout` setting, which defaults to none; the patch
+    read that as a caller's choice and stood down, so sessions were never
+    reaped. A none from a FastMCP-built manager is now treated as unset on the
+    FastMCP line where none is the setting's default. A number from FastMCP's
+    setting still wins, and so does none on FastMCP 4.1 and later.
+  - Four tests asserted the SDK's default and went red on `main` the day it
+    changed, with no change here. No test asserts an upstream default any more:
+    the suite runs against a stand-in SDK defaulting to none, one defaulting to
+    1800, and the installed SDK, plus a real `FastMCP().http_app()` lifespan.
+
+  Behavior change: a second `enable_session_reaper()` call now returns the
+  timeout the first call installed rather than its own argument, so the value
+  returned is always the value in force.
+
+  CI gained three pinned legs (declared floor, newest FastMCP 3, FastMCP 4.0)
+  beside the three Python versions on the newest release. Verified end to end
+  on six FastMCP and SDK pairs: 25 live sessions at a 3s timeout, 0 left after
+  5s idle with the reaper, 25 left without it.
 
 - **Memory leak: the healthcheck no longer probes the MCP transport endpoint.**
   `healthcheck` defaulted to `GET /mcp`. In MCP streamable-http, any request
